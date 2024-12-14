@@ -1,16 +1,41 @@
-# scale the data using robust scaling
-
 import pandas as pd
-from sklearn.preprocessing import RobustScaler
+from sklearn.preprocessing import RobustScaler, MinMaxScaler, StandardScaler
+from data_preprocessing.handle_missing_values import handle_missing_values
 
-df = pd.read_csv("C:/Users/claza/PycharmProjects/PR2024/housing/housing_one_hot_encoded.csv")
 
-# Scale only the numerical columns
-scaler = RobustScaler()
-df[["longitude", "latitude", "housing_median_age", "total_rooms", "total_bedrooms", "population", "households",
-    "median_income"]] = scaler.fit_transform(df[["longitude", "latitude", "housing_median_age", "total_rooms",
-                                                 "total_bedrooms", "population", "households", "median_income"]])
+def scale_features(data_path: str, scaler: str) -> pd.DataFrame:
+    """
+    Scale the features of a dataset using a specified scaler
 
-# save the scaled data to a new CSV file
+    Args:
+        data_path (str): The file path to the CSV dataset.
+        scaler (str): The type of scaler to use. Options: "robust", "min_max", "standard"
 
-df.to_csv("C:/Users/claza/PycharmProjects/PR2024/housing/housing_scaled.csv", index=False)
+    Returns:
+        pd.DataFrame: The scaled DataFrame.
+    """
+    # Handle missing values
+    df, _ = handle_missing_values(data_path)
+
+    # Initialize the scaler
+    if scaler == "robust":
+        scaler = RobustScaler()
+    elif scaler == "min_max":
+        scaler = MinMaxScaler()
+    elif scaler == "standard":
+        scaler = StandardScaler()
+    else:
+        raise ValueError("Invalid scaler. Choose from 'robust', 'min_max', or 'standard'.")
+
+    # Exclude ocean_proximity and median_house_value columns
+    exclude_columns = [col for col in df.columns if col.startswith("ocean_proximity")] + ["median_house_value"]
+
+    # Ensure no NaN values exist
+    if df.isnull().sum().any():
+        raise ValueError("DataFrame contains NaN values after handling missing values.")
+
+    # Scale the remaining columns
+    columns_to_scale = df.columns.difference(exclude_columns)
+    df[columns_to_scale] = scaler.fit_transform(df[columns_to_scale])
+
+    return df
