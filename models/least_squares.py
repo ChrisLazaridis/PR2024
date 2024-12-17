@@ -1,11 +1,13 @@
-from typing import Tuple, List
+from typing import Tuple, List, Union
 from numpy import ndarray
 
-from data_preprocessing.scale_features import scale_features
 from perceptron import calculate_metrics
 import numpy as np
 from sklearn.utils import shuffle
+import pandas as pd
 from time import time
+from sklearn.preprocessing import RobustScaler, MinMaxScaler, StandardScaler
+from data_preprocessing.handle_missing_values import handle_missing_values
 
 
 # Least Squares Regression Class
@@ -44,7 +46,7 @@ class LeastSquares:
 
 
 # noinspection PyShadowingNames
-def split_dataset(X: ndarray, y: ndarray, k: int = 10, bins: int = 100) -> List[Tuple[ndarray, ndarray, ndarray, ndarray]]:
+def split_dataset(X: ndarray, y: ndarray, k: int = 10, bins: int = 10) -> List[Tuple[ndarray, ndarray, ndarray, ndarray]]:
     """
     Split the dataset into k stratified folds for cross-validation, incorporating the continuous distribution
     of the target variable by binning it into classes.
@@ -52,16 +54,16 @@ def split_dataset(X: ndarray, y: ndarray, k: int = 10, bins: int = 100) -> List[
     :param X: Feature matrix. Shape: [n_samples, n_features]
     :param y: Target vector (continuous values). Shape: [n_samples]
     :param k: Number of folds.
-    :param bins: Number of bins to split the continuous target variable into (default: 30).
+    :param bins: Number of bins to split the continuous target variable into (default: 10).
     :return: List of tuples containing (X_train, y_train, X_test, y_test) for each fold.
     """
-    # Bin the continuous target variable into discrete classes
-    y = y.astype(float)  # Ensure y is float
-    bin_edges = np.linspace(float(y.min()), float(y.max()), num=bins + 1)  # Generate bin edges
-    y_binned = np.digitize(y, bins=bin_edges, right=True)  # Bin target values
+    # Ensure y is float and create bins using quantiles
+    y = y.astype(float)
+    y = y.ravel()  # Flatten y to 1D array
+    y_binned = pd.qcut(y, q=bins, labels=False, duplicates="drop")
 
     # Shuffle data to avoid order bias
-    X, y_binned, y = shuffle(X, y_binned, y, random_state=0)  # Shuffle data (random_state for reproducibility)
+    X, y_binned, y = shuffle(X, y_binned, y, random_state=0)
 
     # Create stratified folds based on the binned target variable
     n_samples = X.shape[0]
@@ -72,11 +74,9 @@ def split_dataset(X: ndarray, y: ndarray, k: int = 10, bins: int = 100) -> List[
 
         # Collect test indices for each bin
         for bin_class in np.unique(y_binned):
-            bin_indices = np.where(y_binned == bin_class)[0]  # Get indices for the bin
-            bin_fold_size = len(bin_indices) // k  # Number of samples per fold for the bin
-            start_idx = fold_idx * bin_fold_size  # Start index for the fold
-            end_idx = start_idx + bin_fold_size if fold_idx < k - 1 else len(bin_indices)  # End index for the fold
-            test_indices = np.concatenate([test_indices, bin_indices[start_idx:end_idx]])  # Add test indices
+            bin_indices = np.where(y_binned == bin_class)[0]
+            bin_splits = np.array_split(bin_indices, k)
+            test_indices = np.concatenate([test_indices, bin_splits[fold_idx]])
 
         train_indices = np.setdiff1d(np.arange(n_samples), test_indices)
 
@@ -88,21 +88,44 @@ def split_dataset(X: ndarray, y: ndarray, k: int = 10, bins: int = 100) -> List[
     return folds
 
 
+
 # noinspection PyShadowingNames
-def prepare_dataset(data_path: str, scaler: str) -> Tuple[ndarray, ndarray]:
+def prepare_dataset(data_path: str, scaler: str) -> Tuple[
+    np.ndarray, np.ndarray, Union[StandardScaler, MinMaxScaler, RobustScaler]]:
     """
     Prepare and scale the dataset.
 
     :param data_path: Path to the dataset file.
     :param scaler: Scaler type ('standard', 'min_max', 'robust').
-    :return: Feature matrix X and target vector y.
+    :return: Feature matrix X, target vector y, and the target scaler used.
     """
+    if scaler not in ["standard", "min_max", "robust"]:
+        raise ValueError("Invalid scaler. Choose from 'standard', 'min_max', or 'robust'.")
 
     # Load the dataset
-    df = scale_features(data_path, scaler)
-    X = df.drop(["median_house_value"], axis=1).values  # Shape: [20640, 14]
-    y = df["median_house_value"].astype(int).values  # Shape: [20640]
-    return np.asarray(X, dtype=np.float64), y
+    df, _ = handle_missing_values(data_path)
+    feature_scaler = None
+    target_scaler = None
+    # Initialize scalers for features and target
+    if scaler == "standard":
+        feature_scaler = StandardScaler()
+        target_scaler = StandardScaler()
+    elif scaler == "min_max":
+        feature_scaler = MinMaxScaler()
+        target_scaler = MinMaxScaler()
+    elif scaler == "robust":
+        feature_scaler = RobustScaler()
+        target_scaler = RobustScaler()
+    # Exclude ocean_proximity and median_house_value columns
+    exclude_columns = [col for col in df.columns if col.startswith("ocean_proximity")] + ["median_house_value"]
+
+    feature_columns = df.columns.difference(exclude_columns)
+    df[feature_columns] = feature_scaler.fit_transform(df[feature_columns])
+    df["median_house_value"] = target_scaler.fit_transform(df["median_house_value"].values.reshape(-1, 1))
+
+    X = df[feature_columns].values
+    y = df["median_house_value"].values.reshape(-1, 1)
+    return X, y, target_scaler
 
 
 if __name__ == "__main__":
@@ -112,36 +135,54 @@ if __name__ == "__main__":
 
     for scaler in scalers:
         print(f"\nRunning Least Squares with {scaler} scaler:")
-        X, y = prepare_dataset(data_path, scaler)
+        X, y, target_scaler = prepare_dataset(data_path, scaler)  # Get the target scaler
         folds = split_dataset(X, y, k=k)
 
-        train_mse_list, train_mae_list = [], []
-        test_mse_list, test_mae_list = [], []
+        # Lists to store scaled and descaled metrics
+        train_mse_scaled, train_mae_scaled = [], []
+        test_mse_scaled, test_mae_scaled = [], []
 
-        # Calculate average and median of target for context
-        print(f"Median of target: {np.median(y):.2f}")
-        print(f"Mean of target: {np.mean(y):.2f}")
+        train_mse_descaled, train_mae_descaled = [], []
+        test_mse_descaled, test_mae_descaled = [], []
 
         # Cross-validation loop
-        start_time = time()
         for fold_idx, (X_train, y_train, X_test, y_test) in enumerate(folds):
             model = LeastSquares()
             model.train(X_train, y_train)
 
-            # Predictions and metrics
+            # Predictions on training and testing data (scaled)
             y_pred_train = model.predict(X_train)
-            train_mse, train_mae = calculate_metrics(y_train, y_pred_train)
-
             y_pred_test = model.predict(X_test)
-            test_mse, test_mae = calculate_metrics(y_test, y_pred_test)
 
-            train_mse_list.append(train_mse)
-            train_mae_list.append(train_mae)
-            test_mse_list.append(test_mse)
-            test_mae_list.append(test_mae)
-        elapsed_time_ms = (time() - start_time) * 1000
+            # Calculate scaled metrics
+            train_mse_s, train_mae_s = calculate_metrics(y_train, y_pred_train)
+            test_mse_s, test_mae_s = calculate_metrics(y_test, y_pred_test)
 
-        print("\n--- Average Metrics ---")
-        print(f"Average Training MSE: {np.mean(train_mse_list):.4f}, MAE: {np.mean(train_mae_list):.4f}")
-        print(f"Average Testing MSE: {np.mean(test_mse_list):.4f}, MAE: {np.mean(test_mae_list):.4f}")
-        print(f"Elapsed time: {elapsed_time_ms:.2f} ms")
+            train_mse_scaled.append(train_mse_s)
+            train_mae_scaled.append(train_mae_s)
+            test_mse_scaled.append(test_mse_s)
+            test_mae_scaled.append(test_mae_s)
+
+            # Reverse scale the predictions and targets to get the original values
+            y_pred_train_original = target_scaler.inverse_transform(y_pred_train.reshape(-1, 1)).flatten()
+            y_pred_test_original = target_scaler.inverse_transform(y_pred_test.reshape(-1, 1)).flatten()
+            y_train_original = target_scaler.inverse_transform(y_train.reshape(-1, 1)).flatten()
+            y_test_original = target_scaler.inverse_transform(y_test.reshape(-1, 1)).flatten()
+
+            # Calculate descaled (original) metrics
+            train_mse_d, train_mae_d = calculate_metrics(y_train_original, y_pred_train_original)
+            test_mse_d, test_mae_d = calculate_metrics(y_test_original, y_pred_test_original)
+
+            train_mse_descaled.append(train_mse_d)
+            train_mae_descaled.append(train_mae_d)
+            test_mse_descaled.append(test_mse_d)
+            test_mae_descaled.append(test_mae_d)
+
+        # Print scaled and descaled metrics
+        print("\n--- Scaled Metrics ---")
+        print(f"Average Training MSE: {np.mean(train_mse_scaled):.4f}, MAE: {np.mean(train_mae_scaled):.4f}")
+        print(f"Average Testing MSE: {np.mean(test_mse_scaled):.4f}, MAE: {np.mean(test_mae_scaled):.4f}")
+
+        print("\n--- Descaled Metrics (Original Scale) ---")
+        print(f"Average Training MSE: {np.mean(train_mse_descaled):.2f}, MAE: {np.mean(train_mae_descaled):.2f}")
+        print(f"Average Testing MSE: {np.mean(test_mse_descaled):.2f}, MAE: {np.mean(test_mae_descaled):.2f}")

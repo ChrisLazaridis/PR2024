@@ -28,7 +28,7 @@ def scale_features(data_path: str, scaler: str) -> pd.DataFrame:
         raise ValueError("Invalid scaler. Choose from 'robust', 'min_max', or 'standard'.")
 
     # Exclude ocean_proximity and median_house_value columns
-    exclude_columns = [col for col in df.columns if col.startswith("ocean_proximity")] + ["median_house_value"]
+    exclude_columns = [col for col in df.columns if col.startswith("ocean_proximity")]
 
     # Ensure no NaN values exist
     if df.isnull().sum().any():
