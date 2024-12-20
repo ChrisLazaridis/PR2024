@@ -5,13 +5,12 @@ from perceptron import calculate_metrics
 import numpy as np
 from sklearn.utils import shuffle
 import pandas as pd
-from time import time
 from sklearn.preprocessing import RobustScaler, MinMaxScaler, StandardScaler
 from data_preprocessing.handle_missing_values import handle_missing_values
 
 
 # Least Squares Regression Class
-# noinspection PyShadowingNames
+# noinspection PyShadowingNames,DuplicatedCode
 class LeastSquares:
     def __init__(self) -> None:
         """
@@ -88,10 +87,8 @@ def split_dataset(X: ndarray, y: ndarray, k: int = 10, bins: int = 10) -> List[T
     return folds
 
 
-
 # noinspection PyShadowingNames
-def prepare_dataset(data_path: str, scaler: str) -> Tuple[
-    np.ndarray, np.ndarray, Union[StandardScaler, MinMaxScaler, RobustScaler]]:
+def prepare_dataset(data_path: str, scaler: str) -> Tuple[np.ndarray, np.ndarray, Union[StandardScaler, MinMaxScaler, RobustScaler]]:
     """
     Prepare and scale the dataset.
 
@@ -146,6 +143,7 @@ if __name__ == "__main__":
         test_mse_descaled, test_mae_descaled = [], []
 
         # Cross-validation loop
+        # noinspection DuplicatedCode
         for fold_idx, (X_train, y_train, X_test, y_test) in enumerate(folds):
             model = LeastSquares()
             model.train(X_train, y_train)
@@ -183,6 +181,6 @@ if __name__ == "__main__":
         print(f"Average Training MSE: {np.mean(train_mse_scaled):.4f}, MAE: {np.mean(train_mae_scaled):.4f}")
         print(f"Average Testing MSE: {np.mean(test_mse_scaled):.4f}, MAE: {np.mean(test_mae_scaled):.4f}")
 
-        print("\n--- Descaled Metrics (Original Scale) ---")
+        print("\n--- Original Scale Metrics ---")
         print(f"Average Training MSE: {np.mean(train_mse_descaled):.2f}, MAE: {np.mean(train_mae_descaled):.2f}")
         print(f"Average Testing MSE: {np.mean(test_mse_descaled):.2f}, MAE: {np.mean(test_mae_descaled):.2f}")
