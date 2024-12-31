@@ -116,14 +116,25 @@ def grid_search(data_path: str, output_file: str) -> None:
     if os.path.exists(output_file):
         with open(output_file, "r") as f:
             state = json.load(f)
-        continue_search = input("Checkpoint found. Continue from last checkpoint? (yes/no): ").lower()
-        if continue_search != "yes":
-            os.remove(output_file)
+        valid_input = False
+        while not valid_input:
+            user_input = input(
+                "Checkpoint found. Would you want to resume grid search from there or start over?(yes)/(no): ")
+            if user_input.lower() in ["yes", "no"]:
+                valid_input = True
+            else:
+                print("Invalid input. Please enter 'yes' or 'no'.")
+        if user_input.lower() == "no":
             state = None
+            os.remove(output_file)
+        else:
+            print("Resuming grid search from checkpoint.")
+
     else:
         state = None
 
     # Initialize grid search state
+    k = 5
     if state:
         print("Resuming grid search from checkpoint.")
         scalers = state["scalers"]
@@ -133,22 +144,22 @@ def grid_search(data_path: str, output_file: str) -> None:
         architectures = state["architectures"]
         epochs_range = state["epochs_range"]
         current_idx = state["current_idx"]
+        end_idx = len(learning_rates) * len(decay_rates) * len(momentums) * len(architectures) * len(epochs_range)
         best_metrics = state["best_metrics"]
         best_hyperparams = state["best_hyperparams"]
     else:
         scalers = ["standard"]
-        k = 10
-        learning_rate_min, learning_rate_max, learning_rate_step = 0.01, 0.2, 0.01
-        decay_min, decay_max, decay_step = 0.01, 0.1, 0.01
-        momentum_min, momentum_max, momentum_step = 0.5, 0.99, 0.05
-        epoch_min, epoch_max, epoch_step = 50, 250, 25
-        architectures = [[128, 64], [256, 128, 64], [512, 256, 128, 64], [1024, 512, 256, 128, 64]]
+        learning_rate_min, learning_rate_max, learning_rate_step = 0.05, 0.2, 0.05
+        decay_min, decay_max, decay_step = 0.05, 0.1, 0.05
+        momentum_min, momentum_max, momentum_step = 0.5, 0.9, 0.05
+        epoch_min, epoch_max, epoch_step = 50, 200, 25
+        architectures = [[128, 64], [128, 64, 32], [256, 128, 64]]
 
         learning_rates = np.arange(learning_rate_min, learning_rate_max + learning_rate_step, learning_rate_step)
         decay_rates = np.arange(decay_min, decay_max + decay_step, decay_step)
         momentums = np.arange(momentum_min, momentum_max + momentum_step, momentum_step)
         epochs_range = range(epoch_min, epoch_max + epoch_step, epoch_step)
-
+        end_idx = len(learning_rates) * len(decay_rates) * len(momentums) * len(architectures) * len(epochs_range)
         current_idx = 0
         best_metrics = {"test_mse": float("inf"), "test_mae": float("inf")}
         best_hyperparams = None
@@ -168,7 +179,7 @@ def grid_search(data_path: str, output_file: str) -> None:
     parameter_grid = parameter_grid[current_idx:]
 
     for idx, (scaler, lr, decay, momentum, arch, epochs) in enumerate(parameter_grid, start=current_idx):
-        print(f"\n[{idx + 1}/{len(parameter_grid)}] Testing architecture: {arch}, LR: {lr}, Decay: {decay}, "
+        print(f"\n[{idx + 1}/{end_idx}] Testing architecture: {arch}, LR: {lr}, Decay: {decay}, "
               f"Momentum: {momentum}, Epochs: {epochs}")
         X, y, target_scaler = prepare_dataset(data_path, scaler)
         folds = split_dataset(X, y, k=k)
@@ -179,8 +190,8 @@ def grid_search(data_path: str, output_file: str) -> None:
                                           torch.tensor(y_train, dtype=torch.float32))
             test_dataset = TensorDataset(torch.tensor(X_test, dtype=torch.float32),
                                          torch.tensor(y_test, dtype=torch.float32))
-            train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-            test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+            train_loader = DataLoader(train_dataset, batch_size=2048, shuffle=True)
+            test_loader = DataLoader(test_dataset, batch_size=2048, shuffle=False)
 
             model = NeuralNetwork(input_dim=X.shape[1], hidden_dims=arch).to(device)
             criterion = nn.MSELoss()
@@ -191,7 +202,10 @@ def grid_search(data_path: str, output_file: str) -> None:
             _, _, descaled_predictions, descaled_true_values = evaluate_model(
                 model, test_loader, device, target_scaler
             )
-
+            # make sure that the descaled predictions and true values are not NaN
+            if np.isnan(descaled_predictions).any() or np.isnan(descaled_true_values).any():
+                print("NaN values found. Skipping this fold.")
+                continue
             mse = mean_squared_error(descaled_true_values, descaled_predictions)
             mae = mean_absolute_error(descaled_true_values, descaled_predictions)
             fold_metrics.append((mse, mae))
@@ -205,12 +219,12 @@ def grid_search(data_path: str, output_file: str) -> None:
                                 "epochs": epochs}
 
         # Save checkpoint every 10 iterations
-        if (idx + 1) % 10 == 0 or (idx + 1) == len(parameter_grid):
+        if (idx + 1) % 2 == 0 or (idx + 1) == len(parameter_grid):
             state = {
                 "scalers": scalers,
-                "learning_rates": learning_rates.tolist(),
-                "decay_rates": decay_rates.tolist(),
-                "momentums": momentums.tolist(),
+                "learning_rates": learning_rates,
+                "decay_rates": decay_rates,
+                "momentums": momentums,
                 "architectures": architectures,
                 "epochs_range": list(epochs_range),
                 "current_idx": idx + 1,
@@ -218,6 +232,7 @@ def grid_search(data_path: str, output_file: str) -> None:
                 "best_hyperparams": best_hyperparams,
             }
             save_checkpoint(output_file, state)
+            print(f"Checkpoint saved after {idx + 1} iterations to {output_file}")
 
     print("\nBest Hyperparameters:")
     print(best_hyperparams)
@@ -227,5 +242,5 @@ def grid_search(data_path: str, output_file: str) -> None:
 
 if __name__ == "__main__":
     data_path = "../housing/housing_one_hot_encoded.csv"
-    output_file = "grid_search_checkpoint.json"
+    output_file = "../grid_search_checkpoint.json"
     grid_search(data_path, output_file)

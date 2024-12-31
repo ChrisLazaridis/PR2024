@@ -9,7 +9,6 @@ from tqdm import tqdm
 from torchviz import make_dot
 from typing import Tuple, List
 
-
 # Set a global random seed for reproducibility
 SEED: int = 42
 
@@ -26,7 +25,8 @@ class NeuralNetwork:
     A class to encapsulate the Neural Network model, training, and evaluation processes.
     """
 
-    def __init__(self, input_dim: int, initial_lr: float = 0.1, decay_rate: float = 0.01, batch_size: int = 2048, epochs: int = 100) -> None:
+    def __init__(self, input_dim: int, initial_lr: float = 0.1, decay_rate: float = 0.01, batch_size: int = 2048,
+                 epochs: int = 100) -> None:
         """
         Initializes the Neural Network model with the given architecture and training parameters.
 
@@ -58,7 +58,8 @@ class NeuralNetwork:
         self.optimizer: torch.optim.SGD = torch.optim.SGD(self.model.parameters(), lr=initial_lr, momentum=0.9)
 
         # Scheduler for exponential learning rate decay
-        self.scheduler: torch.optim.lr_scheduler.ExponentialLR = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=1 - decay_rate)
+        self.scheduler: torch.optim.lr_scheduler.ExponentialLR = torch.optim.lr_scheduler.ExponentialLR(self.optimizer,
+                                                                                                        gamma=1 - decay_rate)
 
     def train(self, X_train: np.ndarray, y_train: np.ndarray) -> None:
         """
@@ -82,11 +83,14 @@ class NeuralNetwork:
 
                 # Forward pass
                 outputs: torch.Tensor = self.model(features).squeeze()
+                # Compute Loss
                 loss: torch.Tensor = self.criterion(outputs, targets.squeeze())
 
-                # Backward pass and optimization
+                # Compute Gradients
                 self.optimizer.zero_grad()
+                # Backward pass
                 loss.backward()
+                # Update Weights
                 self.optimizer.step()
 
             # Update learning rate
@@ -176,3 +180,20 @@ if __name__ == "__main__":
 
             train_results.append((train_mse_scaled, train_mae_scaled, train_mse_descaled, train_mae_descaled))
             test_results.append((test_mse_scaled, test_mae_scaled, test_mse_descaled, test_mae_descaled))
+
+        # Print results
+        print("\n--- Scaled Metrics ---")
+        print(
+            f"Average Training MSE: {np.mean([r[0] for r in train_results]):.4f}, MAE: {np.mean([r[1] for r in train_results]):.4f}")
+        print(
+            f"Average Testing MSE: {np.mean([r[0] for r in test_results]):.4f}, MAE: {np.mean([r[1] for r in test_results]):.4f}")
+        print(
+            f"Minimum Testing MSE: {np.min([r[0] for r in test_results]):.4f}, MAE: {np.min([r[1] for r in test_results]):.4f}")
+        print("\n--- Original Scale Metrics ---")
+        print(
+            f"Average Training MSE: {np.mean([r[2] for r in train_results]):.4f}, MAE: {np.mean([r[3] for r in train_results]):.4f}")
+        print(
+            f"Average Testing MSE: {np.mean([r[2] for r in test_results]):.4f}, MAE: {np.mean([r[3] for r in test_results]):.4f}")
+        print(
+            f"Minimum Testing MSE: {np.min([r[2] for r in test_results]):.4f}, MAE: {np.min([r[3] for r in test_results]):.4f}")
+        print("\n")
